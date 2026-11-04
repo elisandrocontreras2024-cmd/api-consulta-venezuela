@@ -2,4 +2,3 @@ fastapi
 uvicorn
 requests
 phonenumbers
-pip install phonenumbers
