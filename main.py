@@ -3,9 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import concurrent.futures
 
-app = FastAPI(title="DRIEMX OSINT Engine", version="1.0")
+app = FastAPI(title="DRIEMX OSINT Engine", version="2.0")
 
-# Habilitar CORS para conectar desde cualquier interfaz
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,7 +13,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lista de plataformas para auditar
 PLATAFORMAS = {
     "GitHub": "https://github.com/{}",
     "Instagram": "https://www.instagram.com/{}/",
@@ -33,7 +31,6 @@ def verificar_red(nombre_red, url_template, username):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         response = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
-        # Si devuelve status 200 OK, la cuenta existe
         existe = response.status_code == 200
         return {
             "plataforma": nombre_red,
@@ -53,17 +50,19 @@ def verificar_red(nombre_red, url_template, username):
 def home():
     return {"status": "Servidor DRIEMX OSINT activo"}
 
+# Endpoint principal para búsqueda de usernames
 @app.get("/search/username")
-def buscar_username(username: str):
-    if not username or len(username) < 2:
+@app.get("/consultar")
+def buscar_username(username: str = None, numero: str = None, tipo: str = None):
+    # Toma 'username' o 'numero' por si el frontend envía 'numero'
+    target = username or numero
+    if not target or len(target) < 2:
         raise HTTPException(status_code=400, detail="Ingresa un usuario válido")
 
     resultados = []
-    
-    # Hilos en paralelo para que la búsqueda sea ultra rápida
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [
-            executor.submit(verificar_red, red, template, username)
+            executor.submit(verificar_red, red, template, target)
             for red, template in PLATAFORMAS.items()
         ]
         for future in concurrent.futures.as_completed(futures):
@@ -72,7 +71,7 @@ def buscar_username(username: str):
     encontrados = [r for r in resultados if r["existe"]]
 
     return {
-        "target_username": username,
+        "target_username": target,
         "total_plataformas_escaneadas": len(PLATAFORMAS),
         "coincidencias_encontradas": len(encontrados),
         "resultados": resultados
