@@ -1,9 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import phonenumbers
+from phonenumbers import geocoder, carrier, timezone
+import re
 import requests
 import concurrent.futures
 
-app = FastAPI(title="DRIEMX OSINT Engine Pro", version="3.0")
+app = FastAPI(title="DRIEMX OSINT Engine Pro", version="5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,99 +16,109 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Diccionario masivo de plataformas agrupadas por categoría
-PLATAFORMAS = {
-    # Redes Sociales & Video
-    "YouTube": "https://www.youtube.com/@{}",
-    "TikTok": "https://www.tiktok.com/@{}",
+PLATAFORMAS_USERNAME = {
+    "GitHub": "https://github.com/{}",
     "Instagram": "https://www.instagram.com/{}/",
-    "Facebook": "https://www.facebook.com/{}",
-    "Twitter / X": "https://x.com/{}",
+    "TikTok": "https://www.tiktok.com/@{}",
     "Telegram": "https://t.me/{}",
     "Pinterest": "https://www.pinterest.com/{}/",
     "Reddit": "https://www.reddit.com/user/{}",
-    "Snapchat": "https://www.snapchat.com/add/{}",
-
-    # Música & Audio
-    "Spotify": "https://open.spotify.com/user/{}",
-    "SoundCloud": "https://soundcloud.com/{}",
-    "Bandcamp": "https://bandcamp.com/{}",
-    "Last.fm": "https://www.last.fm/user/{}",
-
-    # Desarrollo, Código & Tech
-    "GitHub": "https://github.com/{}",
-    "GitLab": "https://gitlab.com/{}",
-    "Replit": "https://replit.com/@{}",
-    "Dev.to": "https://dev.to/{}",
-    "Docker Hub": "https://hub.docker.com/u/{}",
-    "Pypi (Python)": "https://pypi.org/user/{}/",
-
-    # Gaming & Streaming
-    "Twitch": "https://www.twitch.tv/{}",
     "Steam": "https://steamcommunity.com/id/{}",
-    "Roblox": "https://www.roblox.com/user.aspx?username={}",
-    "Chess.com": "https://www.chess.com/member/{}",
-
-    # Blogs & Contenido
-    "Medium": "https://medium.com/@{}",
-    "Blogger": "https://{}.blogspot.com/",
-    "WordPress": "https://{}.wordpress.com/",
-    "Patreon": "https://www.patreon.com/{}"
+    "Twitch": "https://www.twitch.tv/{}"
 }
 
 def verificar_red(nombre_red, url_template, username):
     url = url_template.format(username)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         response = requests.get(url, headers=headers, timeout=3.5, allow_redirects=True)
-        # Verificación inteligente de respuesta
-        existe = response.status_code == 200
         return {
             "plataforma": nombre_red,
             "url": url,
-            "existe": existe,
+            "existe": response.status_code == 200,
             "status_code": response.status_code
         }
     except Exception:
-        return {
-            "plataforma": nombre_red,
-            "url": url,
-            "existe": False,
-            "status_code": 0
-        }
+        return {"plataforma": nombre_red, "url": url, "existe": False, "status_code": 0}
 
 @app.get("/")
 def home():
     return {"status": "Motor DRIEMX OSINT Pro Activo"}
 
 @app.get("/search/username")
-@app.get("/consultar")
-def buscar_username(username: str = None, numero: str = None):
-    target = username or numero
-    if not target or len(target) < 2:
-        raise HTTPException(status_code=400, detail="Ingresa un nombre de usuario válido")
+def buscar_username(username: str):
+    if not username or len(username) < 2:
+        raise HTTPException(status_code=400, detail="Ingresa un usuario válido")
 
     resultados = []
-    
-    # Aumentamos los hilos en paralelo a 20 para mantener velocidad relámpago
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [
-            executor.submit(verificar_red, red, template, target)
-            for red, template in PLATAFORMAS.items()
+            executor.submit(verificar_red, red, template, username)
+            for red, template in PLATAFORMAS_USERNAME.items()
         ]
         for future in concurrent.futures.as_completed(futures):
             resultados.append(future.result())
 
-    # Ordenar alfabéticamente por nombre de plataforma
     resultados.sort(key=lambda x: x["plataforma"])
     encontrados = [r for r in resultados if r["existe"]]
 
     return {
-        "target_username": target,
-        "total_plataformas_escaneadas": len(PLATAFORMAS),
+        "target_username": username,
+        "total_plataformas_escaneadas": len(PLATAFORMAS_USERNAME),
         "coincidencias_encontradas": len(encontrados),
         "resultados": resultados
+    }
+
+@app.get("/search/phone")
+def buscar_telefono(phone: str):
+    if not phone:
+        raise HTTPException(status_code=400, detail="Debes ingresar un número de teléfono")
+
+    # Asegurar el prefijo '+' para análisis E.164
+    formatted_input = phone if phone.startswith("+") else f"+{phone}"
+
+    try:
+        parsed_number = phonenumbers.parse(formatted_input, None)
+    except phonenumbers.NumberParseException:
+        raise HTTPException(status_code=400, detail="El formato del número de teléfono es inválido")
+
+    if not phonenumbers.is_possible_number(parsed_number):
+        raise HTTPException(status_code=400, detail="El número no coincide con la longitud estándar del país")
+
+    es_valido = phonenumbers.is_valid_number(parsed_number)
+    
+    # Análisis de ubicación y proveedor de telefonía
+    region = geocoder.description_for_number(parsed_number, "es") or "Desconocida"
+    operadora = carrier.name_for_number(parsed_number, "es") or "Operadora desconocida / Línea fija"
+    zonas_horarias = list(timezone.time_zones_for_number(parsed_number))
+    
+    # Formatos de salida estandarizados
+    e164_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
+    national_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.NATIONAL)
+    international_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+    
+    clean_digits = re.sub(r'\D', '', e164_format)
+
+    return {
+        "valido": es_valido,
+        "numero_ingresado": phone,
+        "formatos": {
+            "e164": e164_format,
+            "nacional": national_format,
+            "internacional": international_format
+        },
+        "geolocalizacion": {
+            "pais_region": region,
+            "codigo_pais": parsed_number.country_code,
+            "zonas_horarias": zonas_horarias
+        },
+        "telefonia": {
+            "operadora": operadora,
+            "tipo_linea": "Móvil / Celular" if phonenumbers.number_type(parsed_number) == phonenumbers.PhoneNumberType.MOBILE else "Fija / OTRO"
+        },
+        "vectores_mensajeria": {
+            "whatsapp_direct": f"https://wa.me/{clean_digits}",
+            "telegram_direct": f"https://t.me/+{clean_digits}"
+        }
     }
     
