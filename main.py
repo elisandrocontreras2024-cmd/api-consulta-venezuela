@@ -13,7 +13,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Catálogo ampliado de endpoints de pasarelas de registro y recuperación
 ENDPOINTS_MASIVOS = [
     {
         "nombre": "Telegram",
