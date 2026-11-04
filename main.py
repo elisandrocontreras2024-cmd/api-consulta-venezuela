@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import concurrent.futures
 
-app = FastAPI(title="DRIEMX OSINT Engine", version="2.0")
+app = FastAPI(title="DRIEMX OSINT Engine Pro", version="3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,24 +13,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Diccionario masivo de plataformas agrupadas por categoría
 PLATAFORMAS = {
-    "GitHub": "https://github.com/{}",
-    "Instagram": "https://www.instagram.com/{}/",
+    # Redes Sociales & Video
+    "YouTube": "https://www.youtube.com/@{}",
     "TikTok": "https://www.tiktok.com/@{}",
+    "Instagram": "https://www.instagram.com/{}/",
+    "Facebook": "https://www.facebook.com/{}",
+    "Twitter / X": "https://x.com/{}",
     "Telegram": "https://t.me/{}",
     "Pinterest": "https://www.pinterest.com/{}/",
     "Reddit": "https://www.reddit.com/user/{}",
-    "Steam": "https://steamcommunity.com/id/{}",
-    "Twitch": "https://www.twitch.tv/{}",
+    "Snapchat": "https://www.snapchat.com/add/{}",
+
+    # Música & Audio
+    "Spotify": "https://open.spotify.com/user/{}",
     "SoundCloud": "https://soundcloud.com/{}",
-    "Medium": "https://medium.com/@{}"
+    "Bandcamp": "https://bandcamp.com/{}",
+    "Last.fm": "https://www.last.fm/user/{}",
+
+    # Desarrollo, Código & Tech
+    "GitHub": "https://github.com/{}",
+    "GitLab": "https://gitlab.com/{}",
+    "Replit": "https://replit.com/@{}",
+    "Dev.to": "https://dev.to/{}",
+    "Docker Hub": "https://hub.docker.com/u/{}",
+    "Pypi (Python)": "https://pypi.org/user/{}/",
+
+    # Gaming & Streaming
+    "Twitch": "https://www.twitch.tv/{}",
+    "Steam": "https://steamcommunity.com/id/{}",
+    "Roblox": "https://www.roblox.com/user.aspx?username={}",
+    "Chess.com": "https://www.chess.com/member/{}",
+
+    # Blogs & Contenido
+    "Medium": "https://medium.com/@{}",
+    "Blogger": "https://{}.blogspot.com/",
+    "WordPress": "https://{}.wordpress.com/",
+    "Patreon": "https://www.patreon.com/{}"
 }
 
 def verificar_red(nombre_red, url_template, username):
     url = url_template.format(username)
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
     try:
-        response = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
+        response = requests.get(url, headers=headers, timeout=3.5, allow_redirects=True)
+        # Verificación inteligente de respuesta
         existe = response.status_code == 200
         return {
             "plataforma": nombre_red,
@@ -48,19 +78,19 @@ def verificar_red(nombre_red, url_template, username):
 
 @app.get("/")
 def home():
-    return {"status": "Servidor DRIEMX OSINT activo"}
+    return {"status": "Motor DRIEMX OSINT Pro Activo"}
 
-# Endpoint principal para búsqueda de usernames
 @app.get("/search/username")
 @app.get("/consultar")
-def buscar_username(username: str = None, numero: str = None, tipo: str = None):
-    # Toma 'username' o 'numero' por si el frontend envía 'numero'
+def buscar_username(username: str = None, numero: str = None):
     target = username or numero
     if not target or len(target) < 2:
-        raise HTTPException(status_code=400, detail="Ingresa un usuario válido")
+        raise HTTPException(status_code=400, detail="Ingresa un nombre de usuario válido")
 
     resultados = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    
+    # Aumentamos los hilos en paralelo a 20 para mantener velocidad relámpago
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         futures = [
             executor.submit(verificar_red, red, template, target)
             for red, template in PLATAFORMAS.items()
@@ -68,6 +98,8 @@ def buscar_username(username: str = None, numero: str = None, tipo: str = None):
         for future in concurrent.futures.as_completed(futures):
             resultados.append(future.result())
 
+    # Ordenar alfabéticamente por nombre de plataforma
+    resultados.sort(key=lambda x: x["plataforma"])
     encontrados = [r for r in resultados if r["existe"]]
 
     return {
