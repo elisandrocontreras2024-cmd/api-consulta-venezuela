@@ -1,9 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import sqlite3
+import requests
+import concurrent.futures
 
-app = FastAPI(title="API Consulta Real Venezuela", version="3.0")
+app = FastAPI(title="DRIEMX OSINT Engine", version="1.0")
 
+# Habilitar CORS para conectar desde cualquier interfaz
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -12,73 +14,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inicializar y crear la base de datos local SQLite al arrancar el servidor
-def init_db():
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS personas (
-            cedula TEXT PRIMARY KEY,
-            nombre TEXT,
-            estado TEXT,
-            centro_electoral TEXT,
-            rif TEXT
-        )
-    """)
-    # Insertar registros de prueba iniciales (puedes agregar o modificar los que quieras aquí)
-    registros_iniciales = [
-        ('12345678', 'JUAN PEREZ (Registro Real)', 'Activo', 'U.E. Simon Bolívar - Guárico', 'V-12345678-9'),
-        ('87654321', 'MARIA RODRIGUEZ (Registro Real)', 'Activo', 'E.B. Jose Antonio Páez', 'V-87654321-0')
-    ]
-    cursor.executemany("INSERT OR IGNORE INTO personas VALUES (?, ?, ?, ?, ?)", registros_iniciales)
-    conn.commit()
-    conn.close()
+# Lista de plataformas para auditar
+PLATAFORMAS = {
+    "GitHub": "https://github.com/{}",
+    "Instagram": "https://www.instagram.com/{}/",
+    "TikTok": "https://www.tiktok.com/@{}",
+    "Telegram": "https://t.me/{}",
+    "Pinterest": "https://www.pinterest.com/{}/",
+    "Reddit": "https://www.reddit.com/user/{}",
+    "Steam": "https://steamcommunity.com/id/{}",
+    "Twitch": "https://www.twitch.tv/{}",
+    "SoundCloud": "https://soundcloud.com/{}",
+    "Medium": "https://medium.com/@{}"
+}
 
-# Ejecutar la creación de la base de datos
-init_db()
+def verificar_red(nombre_red, url_template, username):
+    url = url_template.format(username)
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        response = requests.get(url, headers=headers, timeout=3, allow_redirects=True)
+        # Si devuelve status 200 OK, la cuenta existe
+        existe = response.status_code == 200
+        return {
+            "plataforma": nombre_red,
+            "url": url,
+            "existe": existe,
+            "status_code": response.status_code
+        }
+    except Exception:
+        return {
+            "plataforma": nombre_red,
+            "url": url,
+            "existe": False,
+            "status_code": 0
+        }
 
 @app.get("/")
 def home():
-    return {"status": "Servidor con Base de Datos Activo"}
+    return {"status": "Servidor DRIEMX OSINT activo"}
 
-# Módulo de consulta conectado a la Base de Datos
-@app.get("/consultar")
-def consultar_datos(tipo: str, numero: str):
-    if not numero or len(numero) < 6:
-        raise HTTPException(status_code=400, detail="Número de documento inválido")
+@app.get("/search/username")
+def buscar_username(username: str):
+    if not username or len(username) < 2:
+        raise HTTPException(status_code=400, detail="Ingresa un usuario válido")
 
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
+    resultados = []
     
-    # Consulta SQL exacta por número de cédula
-    cursor.execute("SELECT nombre, estado, centro_electoral, rif FROM personas WHERE cedula = ?", (numero,))
-    row = cursor.fetchone()
-    conn.close()
+    # Hilos en paralelo para que la búsqueda sea ultra rápida
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [
+            executor.submit(verificar_red, red, template, username)
+            for red, template in PLATAFORMAS.items()
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            resultados.append(future.result())
 
-    # Si la cédula no está registrada en la base de datos, devuelve 404 real
-    if not row:
-        raise HTTPException(status_code=404, detail="No se encontraron registros para este número")
+    encontrados = [r for r in resultados if r["existe"]]
 
     return {
-        "cedula": numero,
-        "nombre": row[0],
-        "estado_consulta": row[1],
-        "centro_electoral": row[2] if row[2] else "No aplica",
-        "rif": row[3] if row[3] else "No asignado",
-        "tipo_consulta": tipo.upper()
+        "target_username": username,
+        "total_plataformas_escaneadas": len(PLATAFORMAS),
+        "coincidencias_encontradas": len(encontrados),
+        "resultados": resultados
     }
-
-# Endpoint auxiliar para insertar nuevos registros reales a tu base de datos vía POST o script
-@app.post("/agregar")
-def agregar_registro(cedula: str, nombre: str, estado: str, centro: str, rif: str):
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    try:
-        cursor.execute("INSERT INTO personas VALUES (?, ?, ?, ?, ?)", (cedula, nombre, estado, centro, rif))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="La cédula ya existe en la base de datos")
-    finally:
-        conn.close()
-    return {"status": "Registro agregado exitosamente", "cedula": cedula}
     
